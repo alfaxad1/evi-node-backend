@@ -55,12 +55,17 @@ const updateLoanStatus = async (loanId, connection) => {
     const installmentsSum = installments[0].installments_sum;
 
     const [balance] = await connection.query(
-      "SELECT remaining_balance FROM loans WHERE loan_id = ?",
-      [loanId]
+      `SELECT l.total_amount - (
+    SELECT COALESCE(SUM(r.amount), 0) 
+    FROM repayments r 
+    WHERE r.loan_id = ? AND status = 'paid'
+  ) AS remaining_balance
+  FROM loans l 
+  WHERE l.id = ?`,
+      [loanId, loanId]
     );
-    const remainingBalance =
-      balance[0].remaining_balance || total_amount - installmentsSum;
-    console.log("Remaining balance:", remainingBalance);
+
+    const remainingBalance = balance[0].remaining_balance;
 
     // Determine new loan status
     let newStatus = loan[0].status;

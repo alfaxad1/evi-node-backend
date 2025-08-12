@@ -282,10 +282,14 @@ const Defaulted = () => {
                       {loan.remaining_balance || loan.total_amount}
                     </TableCell>
                     <TableCell className="px-4 py-3 text-gray-500 text-theme-sm dark:text-gray-400">
-                      {loan.expected_completion_date.slice(0, 10)}
+                      {loan.expected_completion_date != null
+                        ? loan.expected_completion_date.slice(0, 10)
+                        : loan.expected_completion_date}
                     </TableCell>
                     <TableCell className="px-4 py-3 text-gray-500 text-theme-sm dark:text-gray-400">
-                      {loan.default_date.slice(0, 10)}
+                      {loan.default_date != null
+                        ? loan.default_date.slice(0, 10)
+                        : loan.default_date}
                     </TableCell>
                     <TableCell className="px-4 py-3 text-gray-500 text-center text-theme-sm dark:text-gray-400">
                       {loan.days_overdue}
