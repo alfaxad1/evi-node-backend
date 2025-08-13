@@ -38,7 +38,7 @@ const validateCustomerData = [
 // Get all customers with pagination
 router.get("/", async (req, res) => {
   try {
-    const { role, userId, page = 1, limit = 10 } = req.query;
+    const { role, userId, page = 1, limit } = req.query;
     const offset = (page - 1) * limit;
 
     let query = `
@@ -51,34 +51,45 @@ router.get("/", async (req, res) => {
     `;
     let queryParams = [];
 
-    // If the user is an officer, filter customers by created_by field
     if (role === "officer") {
       query += " AND c.created_by = ?";
       queryParams.push(userId);
     }
 
-    // Get total count for pagination metadata
-    const [countResult] = await connection.query(
-      `SELECT COUNT(*) as total FROM (${query}) as filtered`,
-      queryParams
-    );
-    const total = countResult[0].total;
+    let customers;
+    if (limit) {
+      // Get total count for pagination metadata
+      const [countResult] = await connection.query(
+        `SELECT COUNT(*) as total FROM (${query}) as filtered`,
+        queryParams
+      );
+      const total = countResult[0].total;
 
-    // Get paginated customers
-    query += " ORDER BY c.id DESC LIMIT ? OFFSET ?";
-    queryParams.push(limit, offset);
+      query += " ORDER BY c.id DESC LIMIT ? OFFSET ?";
+      queryParams.push(Number(limit), (page - 1) * Number(limit));
 
-    const [customers] = await connection.query(query, queryParams);
+      [customers] = await connection.query(query, queryParams);
 
-    res.status(200).json({
-      data: customers,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+      res.status(200).json({
+        data: customers,
+        meta: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
+    } else {
+      query += " ORDER BY c.id DESC";
+      [customers] = await connection.query(query, queryParams);
+
+      res.status(200).json({
+        data: customers,
+        meta: {
+          total: customers.length,
+        },
+      });
+    }
   } catch (err) {
     console.error("Error getting customers:", err);
     res.status(500).json({ error: "Failed to retrieve customers" });

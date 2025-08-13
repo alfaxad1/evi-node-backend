@@ -80,6 +80,7 @@ const Loans = () => {
   const [amount, setAmount] = useState<string>("");
   const [mpesaCode, setMpesaCode] = useState<string>("");
   const [searchString, setSearchString] = useState<string>("");
+  const [allLoansData, setAllLoansData] = useState<Loan[]>([]);
 
   const fetchLoans = useCallback(
     async (role: string, officerId: string, page: number): Promise<void> => {
@@ -105,6 +106,28 @@ const Loans = () => {
     },
     [apiUrl]
   );
+
+  const fetchAllLoans = useCallback(
+    async (role: string, officerId: string) => {
+      try {
+        const response = await axios.get(`${apiUrl}/api/loans/loan-details`, {
+          params: {
+            role,
+            officerId,
+            // no limit param, or set a very high limit if backend requires
+          },
+        });
+        setAllLoansData(response.data.data);
+      } catch (error) {
+        console.error("Error fetching all loans:", error);
+      }
+    },
+    [apiUrl]
+  );
+
+  useEffect(() => {
+    fetchAllLoans(role, officerId);
+  }, [fetchAllLoans, role, officerId]);
 
   useEffect(() => {
     fetchLoans(role, officerId, page);
@@ -192,11 +215,11 @@ const Loans = () => {
     }
   };
 
-  const filteredLoans = loansData.filter((loan) => {
-    return loan.customer_name
-      .toLowerCase()
-      .includes(searchString.toLowerCase());
-  });
+  const filteredLoans = searchString
+    ? allLoansData.filter((loan) =>
+        loan.customer_name.toLowerCase().includes(searchString.toLowerCase())
+      )
+    : loansData;
 
   return (
     <>

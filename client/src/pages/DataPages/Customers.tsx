@@ -91,15 +91,43 @@ const Customers = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [allCustomersData, setAllCustomersData] = useState<Customer[]>([]);
+
+  const fetchAllCustomers = useCallback(
+    async (role: string, userId: string) => {
+      try {
+        const response = await axios.get(`${apiUrl}/api/customers`, {
+          params: {
+            role,
+            userId,
+            // no limit param, or set a very high limit if backend requires
+          },
+        });
+        setAllCustomersData(response.data.data);
+      } catch (error) {
+        console.error("Error fetching all loans:", error);
+      }
+    },
+    [apiUrl]
+  );
+
+  useEffect(() => {
+    fetchAllCustomers(role, userId);
+  }, [fetchAllCustomers, role, userId]);
 
   const fetchData = useCallback(
     async (role: string, userId: string, page: number): Promise<void> => {
       setLoading(true);
       setError(null);
       try {
-        const response = await axios.get(
-          `${apiUrl}/api/customers?role=${role}&userId=${userId}&page=${page}`
-        );
+        const response = await axios.get(`${apiUrl}/api/customers`, {
+          params: {
+            role,
+            userId,
+            page,
+            limit: 10,
+          },
+        });
         console.log("Data fetched successfully:", response.data);
         setCustomerData(response.data.data);
         setTotalPages(response.data.meta.totalPages);
@@ -177,12 +205,22 @@ const Customers = () => {
     setSelectedCustomerId(null);
   };
 
-  const filteredCustomers = customerData.filter((customer) => {
-    return (
-      customer.first_name.toLowerCase().includes(searchString.toLowerCase()) ||
-      customer.last_name.toLowerCase().includes(searchString.toLowerCase())
-    );
-  });
+  const filteredCustomers = searchString
+    ? allCustomersData.filter(
+        (customer) =>
+          customer.first_name
+            .toLowerCase()
+            .includes(searchString.toLowerCase()) ||
+          customer.last_name.toLowerCase().includes(searchString.toLowerCase())
+      )
+    : customerData;
+
+  // const filteredCustomers = customerData.filter((customer) => {
+  //   return (
+  //     customer.first_name.toLowerCase().includes(searchString.toLowerCase()) ||
+  //     customer.last_name.toLowerCase().includes(searchString.toLowerCase())
+  //   );
+  // });
 
   return (
     <div>

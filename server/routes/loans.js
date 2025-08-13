@@ -38,8 +38,6 @@ const validateLoanData = [
 router.get("/loan-details", async (req, res) => {
   try {
     const { officerId, role, page = 1, limit } = req.query;
-    const offset = (page - 1) * limit;
-
     let baseQuery = `
       SELECT 
         l.id,
@@ -73,13 +71,10 @@ router.get("/loan-details", async (req, res) => {
     const whereClauses = [];
     const queryParams = [];
 
-    // Filter by officer_id if the user is an officer
     if (role === "officer") {
       whereClauses.push("l.officer_id = ?");
       queryParams.push(officerId);
     }
-
-    // Add status filter for active and partially paid loans
     whereClauses.push("l.status IN ('active', 'partially_paid')");
 
     if (whereClauses.length > 0) {
@@ -93,22 +88,35 @@ router.get("/loan-details", async (req, res) => {
     );
     const total = countResult[0].total;
 
-    // Add pagination and sorting
-    const finalQuery = `${baseQuery} ORDER BY l.disbursement_date DESC LIMIT ? OFFSET ?`;
-    const [loans] = await connection.query(finalQuery, [
-      ...queryParams,
-      parseInt(limit),
-      offset,
-    ]);
+    let finalQuery = `${baseQuery} ORDER BY l.disbursement_date DESC`;
+    let loans, meta;
 
-    res.status(200).json({
-      data: loans,
-      meta: {
+    if (limit) {
+      // If limit is provided, use pagination
+      const offset = (page - 1) * limit;
+      finalQuery += ` LIMIT ? OFFSET ?`;
+      [loans] = await connection.query(finalQuery, [
+        ...queryParams,
+        parseInt(limit),
+        offset,
+      ]);
+      meta = {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
         totalPages: Math.ceil(total / limit),
-      },
+      };
+    } else {
+      // If no limit, fetch all
+      [loans] = await connection.query(finalQuery, queryParams);
+      meta = {
+        total,
+      };
+    }
+
+    res.status(200).json({
+      data: loans,
+      meta,
     });
   } catch (err) {
     console.error("Error fetching loan details:", err);
@@ -619,17 +627,18 @@ router.post("/", validateLoanData, async (req, res) => {
 
 //roll-over loan
 router.post("/roll-over/:loanId", async (req, res) => {
+  const { total_amount } = req.body; // Changed from totalAmount to match frontend
   const { loanId } = req.params;
 
   try {
     //1.fetch the loan details
     const [loan] = await connection.query(
-      `SELECT * FROM loans WHERE id = ? AND 
-          status IN('active', 'partially_paid', 'defaulted') AND 
+      `SELECT * FROM loans WHERE id = ? AND
+          status IN('active', 'partially_paid', 'defaulted') AND
           (total_amount - remaining_balance) > total_interest AND
-          rolled_over = 0 AND 
-          DATE(expected_completion_date) = CURRENT_DATE() OR
-          expected_completion_date < CURDATE()`,
+          rolled_over = 0 AND
+          (DATE(expected_completion_date) = CURRENT_DATE() OR
+          expected_completion_date < CURDATE())`,
       [loanId]
     );
 
@@ -638,35 +647,101 @@ router.post("/roll-over/:loanId", async (req, res) => {
         .status(404)
         .json({ error: "Loan not found or not eligible for roll-over" });
     }
-    //2.change the loan status to 'active'
+
+    //get the next due date based on installment type
+    let nextDueDate = new Date();
+    if (loan[0].installment_type === "daily") {
+      nextDueDate.setDate(nextDueDate.getDate() + 1);
+    } else if (loan[0].installment_type === "weekly") {
+      nextDueDate.setDate(nextDueDate.getDate() + 7);
+    }
+
+    // Format the date for MySQL
+    const formattedNextDueDate = nextDueDate
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ");
+
+    //2. create a new loan with the same details but with a new id
+    const [result] = await connection.query(
+      `INSERT INTO loans (
+        customer_id,
+        product_id,
+        officer_id,
+        phone_number,
+        total_amount,
+        installment_type,
+        installment_amount,
+        purpose,
+        processing_fee,
+        expected_completion_date,
+        remaining_balance,
+        disbursement_date,
+        due_date,
+        status,
+        rolled_over
+      ) VALUES (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY),
+        ?,
+        CURRENT_DATE(),
+        ?,
+        'active',
+        0
+      )`,
+      [
+        loan[0].customer_id,
+        loan[0].product_id,
+        loan[0].officer_id,
+        loan[0].phone_number,
+        total_amount,
+        loan[0].installment_type,
+        loan[0].installment_amount,
+        loan[0].purpose,
+        loan[0].processing_fee,
+        total_amount, // remaining_balance = total_amount for new loan
+        formattedNextDueDate,
+      ]
+    );
+
+    //3.update the original loan record
     await connection.query(
-      `UPDATE loans SET 
-          status = 'active', 
-          arrears = 0.00,
-          rolled_over = 1,
-          expected_completion_date = DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY),
-          due_date = DATE_ADD(CURRENT_DATE(), INTERVAL 1 DAY)  
+      `UPDATE loans SET
+          status = 'rolled_over',
+          rolled_over = 1
         WHERE id = ?`,
       [loanId]
     );
-    //3.create a rolled_over record in the rolled_over_loans table
+
+    //4.create a rolled_over record in the rolled_over_loans table
     await connection.query(
-      `INSERT INTO ROLLED_OVER_LOANS 
-          (PREV_LOAN_ID, PREV_PRINCIPAL, BAL_AT_ROLLOVER, PREV_TOTAL_AMOUNT, PREV_APPL_DATE, PREV_EXP_COMPL_DATE, ROLLOVER_DATE) 
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE())`,
+      `INSERT INTO rolled_over_loans
+          (prev_loan_id, new_loan_id, prev_principal, bal_at_rollover, prev_total_amount, new_total_amount, prev_appl_date, prev_exp_compl_date, rollover_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE())`,
       [
         loan[0].id,
+        result.insertId,
         loan[0].principal,
         loan[0].remaining_balance,
         loan[0].total_amount,
+        total_amount,
         loan[0].application_date,
         loan[0].expected_completion_date,
       ]
     );
+
     res.status(200).json({ message: "Loan rolled over successfully" });
   } catch (err) {
     console.error("Error rolling over:", err);
-    res.status(500).json({ error: "Failed to roll over" });
+    res.status(500).json({ error: "Failed to roll over loan" });
   }
 });
 
