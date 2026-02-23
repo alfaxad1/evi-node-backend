@@ -1074,6 +1074,7 @@ router.get("/loan-details/defaulted", async (req, res) => {
       JOIN customers c ON l.customer_id = c.id
       JOIN loan_products lp ON l.product_id = lp.id
       WHERE l.status = 'defaulted'
+      ORDER BY l.id DESC
     `;
 
     const whereClauses = [];
