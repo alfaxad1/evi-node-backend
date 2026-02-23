@@ -1,0 +1,44 @@
+name: Deploy Kolekta Backend
+
+on:
+  push:
+    branches:
+      - main 
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Optional: Install dependencies & build if needed
+      - name: Install Dependencies
+        run: npm install
+
+      # If using TypeScript, add:
+      # - name: Build
+      #   run: npm run build
+
+      - name: Copy Files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "/var/www/eviltd_backend"
+          strip_components: 0
+
+      - name: Restart App on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /var/www/eviltd_backend
+            npm install --production
+            echo "${{ secrets.ENV_CONTENTS }}" > .env
+            pm2 reload eviltd || pm2 start app.js --name "eviltd"
