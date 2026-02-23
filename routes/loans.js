@@ -627,7 +627,7 @@ router.post("/", validateLoanData, async (req, res) => {
 
 //roll-over loan
 router.post("/roll-over/:loanId", async (req, res) => {
-  const { total_amount } = req.body; // Changed from totalAmount to match frontend
+  const { principal } = req.body;
   const { loanId } = req.params;
 
   try {
@@ -635,10 +635,7 @@ router.post("/roll-over/:loanId", async (req, res) => {
     const [loan] = await connection.query(
       `SELECT * FROM loans WHERE id = ? AND
           status IN('active', 'partially_paid', 'defaulted') AND
-          (total_amount - remaining_balance) > total_interest AND
-          rolled_over = 0 AND
-          (DATE(expected_completion_date) = CURRENT_DATE() OR
-          expected_completion_date < CURDATE())`,
+          (total_amount - remaining_balance) > total_interest`,
       [loanId]
     );
 
@@ -656,6 +653,14 @@ router.post("/roll-over/:loanId", async (req, res) => {
       nextDueDate.setDate(nextDueDate.getDate() + 7);
     }
 
+    const [rate] = await connection.query(
+      "SELECT interest_rate FROM loan_products WHERE id = ?",
+      [loan[0].product_id]
+    );
+    const interestRate = rate[0].interest_rate;
+    const interest = (principal * interestRate) / 100;
+    const totalAmount = principal + interest;
+
     // Format the date for MySQL
     const formattedNextDueDate = nextDueDate
       .toISOString()
@@ -669,6 +674,9 @@ router.post("/roll-over/:loanId", async (req, res) => {
         product_id,
         officer_id,
         phone_number,
+        applied_amount,
+        principal,
+        total_interest,
         total_amount,
         installment_type,
         installment_amount,
@@ -690,6 +698,9 @@ router.post("/roll-over/:loanId", async (req, res) => {
         ?,
         ?,
         ?,
+        ?,
+        ?,
+        ?,
         DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY),
         ?,
         CURRENT_DATE(),
@@ -702,12 +713,15 @@ router.post("/roll-over/:loanId", async (req, res) => {
         loan[0].product_id,
         loan[0].officer_id,
         loan[0].phone_number,
-        total_amount,
+        principal,
+        principal,
+        interest,
+        totalAmount,
         loan[0].installment_type,
         loan[0].installment_amount,
         loan[0].purpose,
         loan[0].processing_fee,
-        total_amount, // remaining_balance = total_amount for new loan
+        totalAmount,
         formattedNextDueDate,
       ]
     );
@@ -732,12 +746,11 @@ router.post("/roll-over/:loanId", async (req, res) => {
         loan[0].principal,
         loan[0].remaining_balance,
         loan[0].total_amount,
-        total_amount,
+        totalAmount,
         loan[0].application_date,
         loan[0].expected_completion_date,
       ]
     );
-
     res.status(200).json({ message: "Loan rolled over successfully" });
   } catch (err) {
     console.error("Error rolling over:", err);

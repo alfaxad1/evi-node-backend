@@ -397,6 +397,19 @@ router.post("/", validateLoanApplication, async (req, res) => {
       return res.status(404).json({ error: "Customer not found" });
     }
 
+    // const [activeLoans] = await connection.query(
+    //   "SELECT id FROM loans WHERE customer_id = ? AND approval_status = 'approved' AND status IN ('active', 'pending_disbursement', 'partially_paid', 'defaulted')",
+    //   [customerId]
+    // );
+    // console.log("active: ",activeLoans[0])
+
+    // if (activeLoans[0].id != undefined || activeLoans[0].id != null) {
+    //   return res
+    //     .status(400)
+    //     .json({ error: "Customer has an active or pending loan" });
+    // }
+  
+
     const [phoneNumber] = await connection.query(
       "SELECT phone FROM customers WHERE id = ?",
       [customerId]

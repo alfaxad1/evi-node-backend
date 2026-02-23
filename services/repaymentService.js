@@ -82,14 +82,19 @@ const processPayment = async (paymentData) => {
   console.log("Processing payment data:", paymentData);
 
   const [loans] = await connection.query(
-    `SELECT * FROM loans WHERE status IN ('active', 'partially_paid', 'defaulted') AND phone_number = ? ORDER BY id DESC LIMIT 1`,
+    `SELECT l.* 
+    FROM loans l
+    JOIN customers c ON c.id = l.customer_id
+    WHERE l.status IN ('active', 'partially_paid', 'defaulted')
+    AND c.phone = ?
+    ORDER BY l.id DESC 
+    LIMIT 1`,
     [paymentData.phoneNumber]
   );
 
   if (loans[0]) {
+    console.log("A loan with id " + loans[0].id + " was found");
     const loanId = loans[0].id;
-
-    console.log("Payment processed successfully");
 
     let newArrears = loans[0].arrears || 0;
     let nextDueDate = new Date(loans[0].due_date);

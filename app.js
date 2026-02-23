@@ -28,7 +28,7 @@ const loans = require("./routes/loans");
 const repayments = require("./routes/repayments");
 const transactions = require("./routes/mpesaTransactions");
 const customerRoutes = require("./routes/customerRoutes");
-const repaymentService = require("./services/repaymentService");
+const repaymentService = require("./routes/paymentRouter");
 const { setupCronJobs } = require("./services/scheduler");
 const connection = require("./config/dbConnection");
 

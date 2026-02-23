@@ -1,11 +1,12 @@
 const express = require("express");
 const connection = require("../config/dbConnection");
 const {
-  
   checkMissedPayments,
   updateLoanStatus,
 } = require("../services/loanService.js");
 const { checkLoanDefaults } = require("../services/loanService.js");
+const { calculateArrears, dueDateUpdater } = require("../utility/loanUtils.js");
+const { handleLoanRepayment } = require("../services/paymentService.js");
 
 const router = express.Router();
 router.use(express.json());
@@ -54,7 +55,6 @@ router.get("/", async (req, res) => {
       FROM repayments r
       JOIN loans l ON r.loan_id = l.id
       JOIN customers c ON l.customer_id = c.id
-      ORDER BY r.id DESC
     `;
 
     const queryParams = [];
@@ -62,11 +62,12 @@ router.get("/", async (req, res) => {
     // Add filtering for officer role
     if (role === "officer") {
       sql += " WHERE l.officer_id = ?";
-      queryParams.push(officerId);
+      queryParams.push(parseInt(officerId));
     }
 
-    // Add pagination
+    // Add ordering and pagination
     const offset = (page - 1) * limit;
+    sql += " ORDER BY r.id DESC";
     sql += ` LIMIT ${limit} OFFSET ${offset}`;
 
     const [results] = await connection.query(sql, queryParams);
@@ -121,48 +122,31 @@ router.get("/loan/:loanId", async (req, res) => {
 router.get("/pending", async (req, res) => {
   try {
     const { officerId, role, page = 1, limit = 10 } = req.query;
-    let sql = `
+    const offset = (page - 1) * limit;
+
+    let baseQuery = `
       SELECT * FROM repayments WHERE status = 'pending'
     `;
 
     const queryParams = [];
 
-    // Add filtering for officer role
-    if (role === "officer") {
-      sql += " AND l.officer_id = ?";
-      queryParams.push(officerId);
-    }
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM (${baseQuery}) as count_query`;
+    const [countResult] = await connection.query(countQuery, queryParams);
+    const total = countResult[0].total;
 
     // Add pagination
-    const offset = (page - 1) * limit;
-    sql += ` LIMIT ${limit} OFFSET ${offset}`;
-
-    const [results] = await connection.query(sql, queryParams);
-
-    // Count the total number of pending repayments
-    const countSql = `
-      SELECT COUNT(*) as count
-      FROM repayments r
-      JOIN loans l ON r.loan_id = l.id
-      JOIN customers c ON l.customer_id = c.id
-      WHERE r.status = 'pending'
-    `;
-    if (role === "officer") {
-      countSql += " AND l.officer_id = ?";
-    }
-    const [countResult] = await connection.query(
-      countSql,
-      role === "officer" ? [officerId] : []
-    );
-    const totalCount = countResult[0].count;
+    const finalQuery = `${baseQuery} ORDER BY id DESC LIMIT ? OFFSET ?`;
+    queryParams.push(parseInt(limit), offset);
+    const [results] = await connection.query(finalQuery, queryParams);
 
     res.status(200).json({
-      count: totalCount,
       data: results,
       meta: {
-        page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (err) {
@@ -353,7 +337,7 @@ router.get("/monthly-approved-admin", async (req, res) => {
 
     if (!user) {
       return res.status(401).json({
-        error: "Unauthorized access",
+        error: "Unauthorized user",
       });
     }
 
@@ -454,22 +438,9 @@ router.post("/create", async (req, res) => {
       officer_id,
     } = loan[0];
 
-    let newArrears = arrears || 0;
-    let nextDueDate = new Date(due_date);
 
-    // Check if payment is sufficient
-    if (amount < installment_amount) {
-      newArrears += installment_amount - amount; // Add shortfall to arrears
-    } else if (amount > installment_amount) {
-      newArrears -= amount - installment_amount; // Reduce arrears if overpaid
-    }
-
-    // Update due date
-    if (installment_type === "daily") {
-      nextDueDate.setDate(nextDueDate.getDate() + 1);
-    } else if (installment_type === "weekly") {
-      nextDueDate.setDate(nextDueDate.getDate() + 7);
-    }
+    const newArrears = calculateArrears(arrears, installment_amount, amount);
+    const nextDueDate = dueDateUpdater(due_date, installment_type);
 
     // Update loan record
     await connection.query(
@@ -512,22 +483,63 @@ router.post("/create", async (req, res) => {
   }
 });
 
-// Resolve repayment
-router.delete("/:id", async (req, res) => {
-  try {
-    await connection.query("DELETE FROM repayments WHERE id = ?", [
-      req.params.id,
-    ]);
+router.post("/resolve-payment", async (req, res) => {
+  try{
+    const { loanId, paymentId } = req.query;
 
+    if (!loanId || !paymentId) {
+      return res.status(400).json({ error: "loan Id and paymentId are required" });
+    }
+
+    const [loans] = await connection.query(
+      `SELECT * 
+      FROM loans  
+      WHERE status IN ('active', 'partially_paid', 'defaulted')
+      AND id = ?
+      ORDER BY id DESC 
+      LIMIT 1`,
+      [loanId]
+    );
+
+    if (loans.length === 0) {
+      return res.status(404).json({ error: "Loan not found" });
+    }
+
+   const [payment] = await connection.query(
+      `SELECT * 
+      FROM repayments
+      WHERE id = ? AND status = 'pending'`,
+      [paymentId]
+    );
+
+    if(payment.length === 0){
+      return res.status(404).json({ error: "Payment not found or already processed" });
+    }
+    
+    const paymentData = {
+      Amount: payment[0].amount,
+      paymentName: payment[0].payment_name,
+      phoneNumber: payment[0].phone_number,
+      mpesaCode: payment[0].mpesa_code,
+      time: payment[0].created_at
+    }
+
+    if (loans.length > 0) {
+      await handleLoanRepayment(loans[0], paymentData, connection, { mpesaCode: paymentData.mpesaCode, phoneNumber: paymentData.phoneNumber, paymentName: paymentData.paymentName, time: paymentData.time });
+      await connection.query("DELETE FROM repayments WHERE id = ?", [paymentId]);
+    }else {
+      return res.status(400).json({ error: "No active loan found for this payment" });
+    }
+    
     res.status(200).json({
-      message: "Repayment deleted successfully",
+      message: "Payment resolved successfully",
     });
-  } catch (err) {
-    //await connection.rollback();
-    console.error("Error deleting repayment:", err);
-    res.status(500).json({ error: "Error deleting repayment" });
+
+  }catch (err) {
+    console.error("Error resolving payment:", err);
+    res.status(500).json({ error: "Error resolving payment" });
   }
-});
+})
 
 // Run default checks daily (call this from a cron job)
 router.post("/check-defaults", async (req, res) => {
@@ -559,6 +571,5 @@ router.post("/check-missed-payments", async (req, res) => {
       .json({ error: "Error checking missed payments", details: err.message });
   }
 });
-
 
 module.exports = router;

@@ -33,7 +33,7 @@ const upload = multer({
   },
 });
 
-const url = "https://localhost";
+const url = "https://app.eviltd.co.ke";
 
 // Create new customer with photo uploads
 router.post(
