@@ -1074,7 +1074,6 @@ router.get("/loan-details/defaulted", async (req, res) => {
       JOIN customers c ON l.customer_id = c.id
       JOIN loan_products lp ON l.product_id = lp.id
       WHERE l.status = 'defaulted'
-      ORDER BY l.id DESC
     `;
 
     const whereClauses = [];
@@ -1098,7 +1097,7 @@ router.get("/loan-details/defaulted", async (req, res) => {
     const total = countResult[0].total;
 
     // Add pagination
-    const finalQuery = `${baseQuery} ORDER BY l.default_date ASC LIMIT ? OFFSET ?`;
+    const finalQuery = `${baseQuery} ORDER BY l.id DESC LIMIT ? OFFSET ?`;
     const [loans] = await connection.query(finalQuery, [
       ...queryParams,
       parseInt(limit),
