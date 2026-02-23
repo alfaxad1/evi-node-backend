@@ -28,7 +28,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           source: "."
-          target: "/var/www/eviltd_backend"
+          target: "/var/www/eviltd-backend"
           strip_components: 0
 
       - name: Restart App on VPS
@@ -38,7 +38,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /var/www/eviltd_backend
+            cd /var/www/eviltd-backend
             npm install --production
             echo "${{ secrets.ENV_CONTENTS }}" > .env
             pm2 reload eviltd || pm2 start app.js --name "eviltd"
