@@ -44,9 +44,9 @@ app.use("/api/transactions", transactions);
 app.use("/api/customerNew", customerRoutes);
 app.use("/api/payment", repaymentService);
 
-app.get("/", (req, res) => {
+app.get("/test", (req, res) => {
   res.send(
-    "Welcome to Eviltd System API. Visit /api/... for specific endpoints."
+    "Welcome to Eviltd System API. This is a test endpoint to verify the server is running correctly."
   );
 });
 

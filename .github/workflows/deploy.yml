@@ -1,4 +1,4 @@
-name: Deploy Kolekta Backend
+name: Deploy Evi Backend
 
 on:
   push:
