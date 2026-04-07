@@ -634,8 +634,7 @@ router.post("/roll-over/:loanId", async (req, res) => {
     //1.fetch the loan details
     const [loan] = await connection.query(
       `SELECT * FROM loans WHERE id = ? AND
-          status IN('active', 'partially_paid', 'defaulted') AND
-          (total_amount - remaining_balance) > total_interest`,
+          status IN('active', 'partially_paid', 'defaulted')`,
       [loanId]
     );
 
