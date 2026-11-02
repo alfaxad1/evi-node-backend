@@ -24,7 +24,7 @@ router.post("/account-credit-notification", basicAuth, async (req, res) => {
 
   await connection.query(
     `INSERT INTO repayment_requests (time, data, customer_name, amount) VALUES (?, ?, ?, ?)`,
-    [time, JSON.stringify(req.body), paymentName, Amt]
+    [time, JSON.stringify(req.body), paymentName, Amt],
   );
 
   try {
@@ -81,6 +81,19 @@ router.post("/account-credit-notification", basicAuth, async (req, res) => {
 const processPayment = async (paymentData) => {
   console.log("Processing payment data:", paymentData);
 
+  const [existingTransactions] = await connection.query(
+    `SELECT * FROM mpesa_transactions WHERE mpesa_code = ?`,
+    [paymentData.mpesaCode],
+  );
+
+  if (existingTransactions.length > 0) {
+    console.log(
+      "Duplicate transaction detected for mpesa_code:",
+      paymentData.mpesaCode,
+    );
+    return;
+  }
+
   const [loans] = await connection.query(
     `SELECT l.* 
     FROM loans l
@@ -89,7 +102,7 @@ const processPayment = async (paymentData) => {
     AND c.phone = ?
     ORDER BY l.id DESC 
     LIMIT 1`,
-    [paymentData.phoneNumber]
+    [paymentData.phoneNumber],
   );
 
   if (loans[0]) {
@@ -128,7 +141,7 @@ const processPayment = async (paymentData) => {
       `UPDATE loans 
        SET arrears = ?, due_date = ? 
        WHERE id = ? AND phone_number = ? AND status IN ('active', 'partially_paid', 'defaulted')`,
-      [newArrears, nextDueDate, loanId, paymentData.phoneNumber]
+      [newArrears, nextDueDate, loanId, paymentData.phoneNumber],
     );
 
     await connection.query(
@@ -143,7 +156,7 @@ const processPayment = async (paymentData) => {
         paymentData.Narration.split("~")[2],
         paymentData.Narration.split("~")[3],
         loans[0].officer_id,
-      ]
+      ],
     );
 
     if (paymentData.mpesaCode) {
@@ -166,7 +179,7 @@ const processPayment = async (paymentData) => {
   } else {
     console.log(
       "No matching loan found for phone number:",
-      paymentData.phoneNumber
+      paymentData.phoneNumber,
     );
 
     await connection.query(
@@ -181,7 +194,7 @@ const processPayment = async (paymentData) => {
         paymentData.Narration.split("~")[2],
         paymentData.Narration.split("~")[3],
         null,
-      ]
+      ],
     );
   }
 };
